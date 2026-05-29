@@ -1,0 +1,20 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Generated outputs
+outputs/
+*.png
+*.pdf
+
+# FAISS index files
+memory/*.faiss
+memory/*.pkl
+
+# OS
+.DS_Store

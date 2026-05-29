@@ -1,0 +1,20 @@
+[
+  {
+    "id": 0,
+    "question": "What is the average revenue per region?",
+    "final_report": "Asia leads at \u00a31,940,644 average revenue \u2014 1.76\u00d7 Sub-Saharan Africa.",
+    "confidence": 0.95,
+    "rows_validated": 100,
+    "dataset_path": "data/sales.csv",
+    "timestamp": "2026-05-27T14:58:13.915189"
+  },
+  {
+    "id": 1,
+    "question": "Are there any anomalies in Total Revenue?",
+    "final_report": "3 outliers found above \u00a35,127,029 \u2014 values of \u00a35.99M, \u00a35.51M, \u00a35.39M.",
+    "confidence": 0.92,
+    "rows_validated": 100,
+    "dataset_path": "data/sales.csv",
+    "timestamp": "2026-05-27T14:58:15.639459"
+  }
+]

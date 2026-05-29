@@ -1,0 +1,19 @@
+version: "3.9"
+
+services:
+  insightflow:
+    build: .
+    container_name: insightflow
+    ports:
+      - "8000:8000"
+      - "8501:8501"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MODEL_ROUTING=${MODEL_ROUTING:-gpt-4o-mini}
+      - MODEL_REASONING=${MODEL_REASONING:-gpt-4o}
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+      - ./memory:/app/memory
+      - ./credentials:/app/credentials
+    restart: unless-stopped

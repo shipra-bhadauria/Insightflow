@@ -1,0 +1,13 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.git/
+.gitignore
+outputs/*.png
+outputs/*.pdf
+memory/faiss_index.bin
+memory/faiss_metadata.json
+credentials/
+*.egg-info/
