@@ -17,11 +17,7 @@ CATEGORY_KEYWORDS = ["region", "segment", "category", "type", "status", "channel
                      "department", "team", "group", "class", "tier", "level",
                      "country", "city", "area", "zone", "division", "product"]
 
-llm = ChatOpenAI(
-    model=os.getenv("MODEL_ROUTING", "gpt-4o-mini"),
-    api_key=os.getenv("OPENAI_API_KEY"),
-    temperature=0,
-)
+
 
 SYSTEM_PROMPT = """You are a data analyst. Given a list of column names and their
 data types, identify which column is most likely:
@@ -152,6 +148,11 @@ def _keyword_detect(df: pd.DataFrame) -> dict:
 
 
 def _llm_detect(df: pd.DataFrame) -> dict:
+    llm = ChatOpenAI(
+        model=os.getenv("MODEL_ROUTING", "gpt-4o-mini"),
+        api_key=os.getenv("OPENAI_API_KEY"),
+        temperature=0,
+    )
     schema = []
     for col in df.columns:
         dtype = str(df[col].dtype)
