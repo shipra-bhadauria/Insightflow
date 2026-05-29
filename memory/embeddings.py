@@ -14,6 +14,7 @@ EMBEDDING_DIM   = 1536
 
 
 def get_embedding(text: str) -> list[float]:
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     text = text.strip().replace("\n", " ")
     response = client.embeddings.create(
         input=text,
@@ -23,6 +24,7 @@ def get_embedding(text: str) -> list[float]:
 
 
 def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     texts = [t.strip().replace("\n", " ") for t in texts]
     response = client.embeddings.create(
         input=texts,
