@@ -21,13 +21,16 @@ def render_center_panel():
     with col_dashboard:
         dashboard_clicked = st.button("Full Dashboard", use_container_width=True)
 
+    # naya:
     if analyze_clicked and question and st.session_state.dataset_path:
+       
         _run_analysis(question, mode="single")
 
     if dashboard_clicked and st.session_state.dataset_path:
+       
         _run_analysis("Generate a complete dashboard analysis", mode="dashboard")
 
-    if st.session_state.final_state:
+    if st.session_state.get("final_state"):
         mode = st.session_state.final_state.get("mode", "single")
         if mode == "dashboard":
             _render_dashboard()
@@ -48,8 +51,6 @@ def _run_analysis(question: str, mode: str):
     from graph.workflow import workflow
 
     with st.spinner("Agents running..."):
-
-        # PDF or image — use direct LLM call
         if st.session_state.get("source_type") in ["pdf", "image"]:
             _run_pdf_analysis(question)
             return
@@ -325,7 +326,16 @@ def _render_dashboard():
             and stats.get("mean", 0) > 100
             and stats.get("max", 0) > 20
         }
-        items = list(filtered.items())[:4]
+        # skip columns jo meaningful nahi hain
+        skip_kpi = ["id", "number", "room", "phone", "zip", 
+                    "code", "key", "ref", "index", "rank"]
+
+        items = [
+            (col, stats) for col, stats in numeric.items()
+            if not any(kw in col.lower() for kw in skip_kpi)
+            and stats.get("mean", 0) > 10
+        ][:4]
+
         if not items:
             items = list(numeric.items())[:4]
 
@@ -382,14 +392,26 @@ def _render_dashboard():
             clean    = [p for p in parts if not p.isdigit()]
             return " ".join(clean).title()
 
-        for chart in charts:
-            title = _get_chart_title(chart)
-            st.markdown(f"""
-            <div style="font-size:10px;color:#6ab46a;
-            margin-bottom:4px">{title}</div>
-            """, unsafe_allow_html=True)
-            st.image(chart, use_container_width=True)
+        # 2 charts side by side
+        for i in range(0, len(charts), 2):
+            col1, col2 = st.columns(2)
+            with col1:
+                title = _get_chart_title(charts[i])
+                st.markdown(f"""
+                <div style="font-size:10px;color:#6ab46a;
+                margin-bottom:4px">{title}</div>
+                """, unsafe_allow_html=True)
+                st.image(charts[i], use_container_width=True)
+            with col2:
+                if i + 1 < len(charts):
+                    title = _get_chart_title(charts[i + 1])
+                    st.markdown(f"""
+                    <div style="font-size:10px;color:#6ab46a;
+                    margin-bottom:4px">{title}</div>
+                    """, unsafe_allow_html=True)
+                    st.image(charts[i + 1], use_container_width=True)
 
+                    
     if st.session_state.quality_report:
         q     = st.session_state.quality_report
         score = q["completeness_score"] * 100

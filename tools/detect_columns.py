@@ -1,234 +1,241 @@
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import pandas as pd
+import json
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from dotenv import load_dotenv
-import os
-import json
 
 load_dotenv()
 
-DATE_KEYWORDS     = ["date", "time", "day", "month", "year", "period", "week"]
-VALUE_KEYWORDS    = [
-    "revenue", "profit", "sales", "income", "salary", "wage",
-    "amount", "total", "price", "cost", "value", "fee",
-    "score", "rate", "units", "quantity", "qty", "count"
-]
-CATEGORY_KEYWORDS = ["region", "segment", "category", "type", "status", "channel",
-                     "department", "team", "group", "class", "tier", "level",
-                     "country", "city", "area", "zone", "division", "product"]
+SYSTEM_PROMPT = """You are an expert data analyst.
+Given a dataset schema — identify every column's analytical role.
 
-
-
-SYSTEM_PROMPT = """You are a data analyst. Given a list of column names and their
-data types, identify which column is most likely:
-- date_col: a date or time column
-- value_col: the main numeric value column (revenue, salary, score etc)
-- category_col: the main grouping/category column (region, segment, department etc)
-- id_col: a unique identifier column
-
-Respond ONLY in this JSON format, no extra text:
+Return ONLY this JSON — no markdown, no backticks, no extra text:
 {
-  "date_col": "column_name or null",
-  "value_col": "column_name or null",
-  "category_col": "column_name or null",
-  "id_col": "column_name or null"
-}"""
+  "date_col":          "column_name or null",
+  "value_col":         "column_name or null",
+  "all_value_cols":    ["col1", "col2"],
+  "category_col":      "column_name or null",
+  "all_category_cols": ["col1", "col2", "col3", "col4", "col5"],
+  "id_col":            "column_name or null",
+  "skip_cols":         ["col1"],
+  "domain":            "sales/hr/hospital/finance/logistics/ecommerce/other"
+}
+
+STRICT RULES:
+
+1. date_col
+   → column with actual dates or timestamps
+   → NOT year-only integers like 2020, 2021
+
+2. value_col
+   → PRIMARY numeric column worth summing or averaging
+   → examples: revenue, billing amount, salary, score, price
+
+3. all_value_cols
+   → ALL numeric columns worth analyzing — aim for 2-4
+   → EXCLUDE: id numbers, room numbers, phone numbers, zip codes
+   → INCLUDE: age, score, rating, count, quantity — even if integers
+
+4. category_col
+   → PRIMARY grouping column — most analytically useful
+
+5. all_category_cols
+   → MOST IMPORTANT FIELD — minimum 4-6 columns, aim for 5-8
+   → INCLUDE any column where:
+      * unique values are between 2 and 100
+      * OR unique values list shows short labels/words/codes
+      * examples: Gender, Status, Type, Result, Grade, Level,
+        Region, Department, Category, Blood Type, Condition,
+        Outcome, Rating, Priority, Stage — anything for GROUP BY
+   → EXCLUDE only:
+     * full person names, email addresses, street addresses, URLs
+     * Quality/rating labels applied to products: POOR/GOOD/EXCELLENT, 
+       LOW/MEDIUM/HIGH when describing product quality scores
+     * Derived metric categories that don't make business sense for GROUP BY
+       e.g. "Retention Value: POOR/GOOD" — this is a quality label, not a category
+   → INCLUDE:
+     * Institution names, company names, hospital names
+     * Geographic groupings: city, country, region
+     * Business categories: product type, department, status
+     * Medical/HR categories: condition, blood type, admission type
+   → RULE: Ask yourself "Does grouping by this column give meaningful business insight?"
+     If YES → include. If NO → skip_cols.
+
+6. id_col
+   → unique row identifier — unique count close to total rows
+
+7. skip_cols
+   → ONLY these: full names, email addresses, street addresses, URLs
+   → DO NOT skip columns with 2-100 unique categorical values
+   → DO NOT skip columns just because they seem less important
+
+8. domain → what kind of dataset is this?
+
+KEY INSIGHT: Look at the "unique values" list provided for each column.
+If you see short repeating labels like Normal/Abnormal/Inconclusive,
+Yes/No, Male/Female, Active/Inactive — that column is a CATEGORY,
+not a skip column."""
 
 
-def _is_text_col(series: pd.Series) -> bool:
-    return series.dtype == object or pd.api.types.is_string_dtype(series)
-
-
-def _keyword_detect(df: pd.DataFrame) -> dict:
-    detected = {
-        "date_col":     None,
-        "value_col":    None,
-        "category_col": None,
-        "id_col":       None,
-    }
-
-    col_lower = {col: col.lower() for col in df.columns}
-    numeric_cols = df.select_dtypes(include="number").columns.tolist()
-
-    # also include string columns that look numeric
+def _build_schema(df: pd.DataFrame) -> str:
+    """Schema with unique value samples for low-cardinality columns."""
+    lines = []
+    total_rows = len(df)
     for col in df.columns:
-        if col not in numeric_cols:
-            try:
-                converted = pd.to_numeric(df[col], errors="coerce")
-                if converted.notna().sum() > len(df) * 0.5:
-                    numeric_cols.append(col)
-            except Exception:
-                pass
-    text_cols = [col for col in df.columns if _is_text_col(df[col])]
+        dtype    = str(df[col].dtype)
+        n_unique = df[col].nunique()
+        pct      = round(n_unique / total_rows * 100, 1)
+        samples  = df[col].dropna().head(3).tolist()
+        sample_str = ", ".join(str(s) for s in samples)
 
-    # date — keyword match first
-    # date — keyword match first
-    # require keyword to be a standalone word not part of another word
-    # e.g. "year resale value" should NOT match but "order date" should
-    STRICT_DATE_KEYWORDS = ["date", "time", "period", "week", "timestamp"]
-    LOOSE_DATE_KEYWORDS  = ["day", "month"]
+        # for low cardinality columns — show ALL unique values
+        if n_unique <= 20:
+            all_vals = df[col].dropna().unique().tolist()
+            unique_str = f"ALL values: {all_vals}"
+        else:
+            unique_str = f"samples: {sample_str}"
 
-    for col, lower in col_lower.items():
-        words = lower.split()
-        if any(kw in words for kw in STRICT_DATE_KEYWORDS):
-            detected["date_col"] = col
-            break
-
-    if not detected["date_col"]:
-        for col, lower in col_lower.items():
-            words = lower.split()
-            if any(kw in words for kw in LOOSE_DATE_KEYWORDS):
-                detected["date_col"] = col
-                break
-
-    # date — try parsing as datetime if keyword missed
-    if not detected["date_col"]:
-        for col in text_cols:
-            try:
-                pd.to_datetime(df[col].dropna().head(10))
-                detected["date_col"] = col
-                break
-            except Exception:
-                pass
-    
-    # validate detected date_col actually contains real dates
-    if detected["date_col"]:
-        try:
-            sample = pd.to_numeric(df[detected["date_col"]].dropna().head(10), errors="coerce")
-            if sample.notna().all():
-                # all values are plain numbers — not a real date column
-                detected["date_col"] = None
-        except Exception:
-            pass
-
-    # value — keyword match on numeric columns
-    # iterate keywords in priority order so "revenue" beats "units"
-    for kw in VALUE_KEYWORDS:
-        for col, lower in col_lower.items():
-            if col in numeric_cols and kw in lower:
-                if any(id_kw in lower for id_kw in ["id", "code", "key", "ref", "number"]):
-                    continue
-                detected["value_col"] = col
-                break
-        if detected["value_col"]:
-            break
-
-    if not detected["value_col"] and numeric_cols:
-        non_id_cols = [
-            col for col in numeric_cols
-            if not any(kw in col.lower() for kw in ["id", "code", "key", "ref"])
-        ]
-        cols_to_check = non_id_cols if non_id_cols else numeric_cols
-        means = {col: df[col].mean() for col in cols_to_check}
-        detected["value_col"] = max(means, key=means.get)
-
-    # value — fallback to numeric col with highest mean
-    if not detected["value_col"] and numeric_cols:
-        means = {col: df[col].mean() for col in numeric_cols}
-        detected["value_col"] = max(means, key=means.get)
-
-    # category — keyword match on text columns
-    for col, lower in col_lower.items():
-        if _is_text_col(df[col]) and any(kw in lower for kw in CATEGORY_KEYWORDS):
-            detected["category_col"] = col
-            break
-
-    # category — fallback to text col with lowest unique count
-    if not detected["category_col"] and text_cols:
-        cardinality = {col: df[col].nunique() for col in text_cols}
-        detected["category_col"] = min(cardinality, key=cardinality.get)
-
-    # id column
-    for col, lower in col_lower.items():
-        if any(kw in lower for kw in ["id", "code", "key", "ref", "number"]):
-            detected["id_col"] = col
-            break
-
-    return detected
+        lines.append(
+            f"{col!r} | {dtype} | {n_unique} unique ({pct}%) | {unique_str}"
+        )
+    return f"Total rows: {total_rows}\n\n" + "\n".join(lines)
 
 
-def _llm_detect(df: pd.DataFrame) -> dict:
+def _call_llm(schema_text: str) -> dict:
     llm = ChatOpenAI(
         model=os.getenv("MODEL_ROUTING", "gpt-4o-mini"),
         api_key=os.getenv("OPENAI_API_KEY"),
         temperature=0,
     )
-    schema = []
-    for col in df.columns:
-        dtype = str(df[col].dtype)
-        sample = str(df[col].dropna().iloc[0]) if len(df[col].dropna()) > 0 else "null"
-        schema.append(f"{col} ({dtype}) — sample: {sample}")
-
-    schema_text = "\n".join(schema)
-
     response = llm.invoke([
         SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content=f"Columns:\n{schema_text}")
+        HumanMessage(content=f"Dataset schema:\n{schema_text}")
     ])
-
     content = response.content.strip()
-    if "```" in content:
-        content = content.split("```")[1]
-        if content.startswith("json"):
-            content = content[4:]
+    content = content.replace("```json", "").replace("```", "").strip()
+    return json.loads(content)
 
-    result = json.loads(content.strip())
 
-    # only keep columns that actually exist in the df
+def _validate_against_df(result: dict, df: pd.DataFrame) -> dict:
+    actual_cols = list(df.columns)
     for key in ["date_col", "value_col", "category_col", "id_col"]:
-        if result.get(key) not in df.columns:
+        if result.get(key) not in actual_cols:
             result[key] = None
-
+    for key in ["all_value_cols", "all_category_cols", "skip_cols"]:
+        result[key] = [
+            col for col in result.get(key, [])
+            if col in actual_cols
+        ]
     return result
 
 
-def detect_columns(df: pd.DataFrame, use_llm_fallback: bool = True) -> dict:
+def _calculate_confidence(result: dict) -> float:
+    base = sum(
+        1 for k in ["date_col", "value_col", "category_col"]
+        if result.get(k)
+    ) / 3
+    category_count = len(result.get("all_category_cols", []))
+    category_bonus = min(category_count / 5, 1.0) * 0.2
+    return round(min(base + category_bonus, 1.0), 2)
 
-    # layer 1 — fast keyword heuristic
-    detected = _keyword_detect(df)
 
-    # which slots are still empty
-    missing = [k for k in ["date_col", "value_col", "category_col", "id_col"]
-               if not detected.get(k)]
+def _fallback_result(df: pd.DataFrame) -> dict:
+    numeric_cols = df.select_dtypes(include="number").columns.tolist()
+    text_cols    = df.select_dtypes(include="object").columns.tolist()
 
-    # layer 2 — LLM fallback for missing slots only
-    if missing and use_llm_fallback:
-        llm_result = _llm_detect(df)
-        for key in missing:
-            if llm_result.get(key):
-                detected[key] = llm_result[key]
-                detected[f"{key}_source"] = "llm"
+    value_col = None
+    if numeric_cols:
+        skip_kw = ["id", "code", "key", "ref", "number", "phone", "zip", "room"]
+        clean   = [c for c in numeric_cols
+                   if not any(kw in c.lower() for kw in skip_kw)]
+        pool    = clean if clean else numeric_cols
+        means   = {c: df[c].mean() for c in pool}
+        value_col = max(means, key=means.get)
 
-    # mark keyword detections
-    for key in ["date_col", "value_col", "category_col", "id_col"]:
-        if detected.get(key) and f"{key}_source" not in detected:
-            detected[f"{key}_source"] = "keyword"
-
-    # confidence score
-    found = sum(1 for k in ["date_col", "value_col", "category_col", "id_col"]
-                if detected.get(k))
-    detected["confidence"] = round(found / 4, 2)
-
-    detected["category_unique_values"] = (
-        int(df[detected["category_col"]].nunique())
-        if detected.get("category_col") else None
+    all_cats = sorted(
+        [c for c in text_cols if 2 <= df[c].nunique() <= 100],
+        key=lambda c: df[c].nunique()
     )
+    category_col = all_cats[0] if all_cats else None
 
-    return detected
+    return {
+        "date_col":          None,
+        "value_col":         value_col,
+        "all_value_cols":    [value_col] if value_col else [],
+        "category_col":      category_col,
+        "all_category_cols": all_cats[:8],
+        "id_col":            None,
+        "skip_cols":         [],
+        "domain":            "other",
+        "confidence":        0.40,
+        "source":            "fallback",
+        "category_unique_values": (
+            int(df[category_col].nunique()) if category_col else None
+        ),
+    }
+
+
+def detect_columns(df: pd.DataFrame, use_llm_fallback: bool = True) -> dict:
+    schema_text = _build_schema(df)
+
+    try:
+        result = _call_llm(schema_text)
+        result = _validate_against_df(result, df)
+
+        if result.get("category_col") and \
+                result["category_col"] not in result.get("all_category_cols", []):
+            result.setdefault("all_category_cols", []).insert(
+                0, result["category_col"]
+            )
+
+        if result.get("value_col") and \
+                result["value_col"] not in result.get("all_value_cols", []):
+            result.setdefault("all_value_cols", []).insert(
+                0, result["value_col"]
+            )
+
+        result["source"]     = "llm"
+        result["confidence"] = _calculate_confidence(result)
+        result["category_unique_values"] = (
+            int(df[result["category_col"]].nunique())
+            if result.get("category_col") else None
+        )
+        return result
+
+    except Exception as e:
+        if use_llm_fallback:
+            fallback = _fallback_result(df)
+            fallback["llm_error"] = str(e)
+            return fallback
+        raise
 
 
 if __name__ == "__main__":
-    import sys
     file_path = sys.argv[1] if len(sys.argv) > 1 else "data/sales.csv"
 
-    df = pd.read_csv(file_path)
+    if file_path.endswith(".csv"):
+        df = pd.read_csv(file_path)
+    else:
+        df = pd.read_excel(file_path)
+
+    print(f"\nDataset: {file_path}")
+    print(f"Shape:   {df.shape[0]} rows x {df.shape[1]} cols\n")
+
     result = detect_columns(df)
 
-    print("=== Smart Column Detection ===\n")
-    print(f"Date column:     {result['date_col']} ({result.get('date_col_source', '?')})")
-    print(f"Value column:    {result['value_col']} ({result.get('value_col_source', '?')})")
-    print(f"Category column: {result['category_col']} ({result.get('category_col_source', '?')})")
-    print(f"ID column:       {result['id_col']} ({result.get('id_col_source', '?')})")
-    print(f"Confidence:      {result['confidence'] * 100:.0f}%")
-    if result.get("category_col"):
-        print(f"Category unique: {result['category_unique_values']} values")
+    print(f"Domain:            {result.get('domain')}")
+    print(f"Source:            {result.get('source')}")
+    print(f"Confidence:        {result.get('confidence', 0) * 100:.0f}%")
+    print(f"\ndate_col:          {result['date_col']}")
+    print(f"value_col:         {result['value_col']}")
+    print(f"all_value_cols:    {result['all_value_cols']}")
+    print(f"category_col:      {result['category_col']}")
+    print(f"all_category_cols: {result['all_category_cols']}")
+    print(f"id_col:            {result['id_col']}")
+    print(f"skip_cols:         {result['skip_cols']}")
+    if result.get("llm_error"):
+        print(f"\nLLM Error: {result['llm_error']}")

@@ -16,5 +16,14 @@
     "rows_validated": 100,
     "dataset_path": "data/sales.csv",
     "timestamp": "2026-05-27T14:58:15.639459"
+  },
+  {
+    "id": 2,
+    "question": "what is the average billing amount",
+    "final_report": "## Finding\nThe average billing amount is $25,539.32 across 55,500 records.\n\n## Why it matters\nUnderstanding the average billing amount helps in setting pricing strategies and negotiating with insurance providers to ensure competitive and profitable healthcare services.",
+    "confidence": 0.6,
+    "rows_validated": 55500,
+    "dataset_path": "data/hospital-dataset.xlsx",
+    "timestamp": "2026-06-09T23:50:33.321218"
   }
 ]

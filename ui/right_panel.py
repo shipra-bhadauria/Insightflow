@@ -8,7 +8,7 @@ def render_right_panel():
     color:#3a5a3a;margin-bottom:10px">Live Agent Workflow</p>
     """, unsafe_allow_html=True)
 
-    if not st.session_state.final_state:
+    if not st.session_state.get("final_state"):
         # waiting state — show empty agent cards
         agents = [
             ("Planner",  "gpt-4o-mini", "waiting"),
