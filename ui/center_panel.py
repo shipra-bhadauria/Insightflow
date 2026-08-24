@@ -68,6 +68,8 @@ def render_center_panel():
         _run_analysis("Generate a complete dashboard analysis", mode="dashboard")
 
     if st.session_state.get("final_state"):
+        if st.session_state.pop("cache_hit", False):
+            st.info("⚡ Loaded from cache — no API call needed!")
         mode = st.session_state.final_state.get("mode", "single")
         if mode == "dashboard":
             _render_dashboard()
@@ -117,18 +119,16 @@ def _run_analysis(question: str, mode: str):
 
     st.session_state["last_question"] = question
 
-    # cache disabled — critic_history serialization issues
-    # cached = get_cached(question, st.session_state.dataset_path, mode)
-    # if cached:
-    #     st.info("⚡ Loaded from cache — no API call needed!")
-    #     st.session_state.final_state = cached
-    #     st.session_state.past_analyses.append({
-    #         "question":   question,
-    #         "confidence": "cached",
-    #         "report":     cached.get("final_report", ""),
-    #     })
-    #     st.rerun()
-    #     return
+    cached = get_cached(question, st.session_state.dataset_path, mode)
+    if cached:
+        from state import CriticVerdict
+        cached["critic_history"] = [CriticVerdict(attempt_number=1, approved=True, confidence_score=0.9, reason="Loaded from cache", rows_validated=0)]
+        cached.setdefault("analysis_history", [])
+        st.session_state["cache_hit"] = True
+        st.session_state.final_state = cached
+        st.session_state.past_analyses.append({"question": question, "confidence": "cached", "report": cached.get("final_report", "")})
+        st.rerun()
+        return
 
     state = new_state(
         question=question,
@@ -447,17 +447,19 @@ def _render_result():
             if a.chart_path not in charts:
                 charts.append(a.chart_path)
 
-    if charts:
+    tool_results_list = []
+    for a in analysis_hist:
+        if hasattr(a, "tool_result") and a.tool_result:
+            tool_results_list.append(a.tool_result)
+    if not tool_results_list and final_state.get("analysis_history_tools"):
+        tool_results_list = final_state["analysis_history_tools"]
+
+    if tool_results_list:
         try:
             from tools.chart import make_plotly_chart
             df   = st.session_state.get("df")
             figs = []
             seen = set()
-
-            tool_results_list = []
-            for a in analysis_hist:
-                if hasattr(a, "tool_result") and a.tool_result:
-                    tool_results_list.append(a.tool_result)
 
             if df is not None:
                 for tool_result in tool_results_list:
