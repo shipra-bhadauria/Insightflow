@@ -15,14 +15,15 @@ Given a dataset schema — identify every column's analytical role.
 
 Return ONLY this JSON — no markdown, no backticks, no extra text:
 {
-  "date_col":          "column_name or null",
-  "value_col":         "column_name or null",
-  "all_value_cols":    ["col1", "col2"],
-  "category_col":      "column_name or null",
-  "all_category_cols": ["col1", "col2", "col3", "col4", "col5"],
-  "id_col":            "column_name or null",
-  "skip_cols":         ["col1"],
-  "domain":            "sales/hr/hospital/finance/logistics/ecommerce/other"
+  "date_col":              "column_name or null",
+  "value_col":             "column_name or null",
+  "all_value_cols":        ["col1", "col2", "col3"],
+  "category_col":          "column_name or null",
+  "all_category_cols":     ["col1", "col2", "col3"],
+  "high_cardinality_cols": ["col1"],
+  "id_col":                "column_name or null",
+  "skip_cols":             ["col1"],
+  "domain":                "sales/hr/hospital/finance/logistics/ecommerce/other"
 }
 
 STRICT RULES:
@@ -32,53 +33,52 @@ STRICT RULES:
    → NOT year-only integers like 2020, 2021
 
 2. value_col
-   → PRIMARY numeric column worth summing or averaging
-   → examples: revenue, billing amount, salary, score, price
+   → PRIMARY numeric column most worth analyzing
+   → e.g. revenue, price, salary, score, billing amount
 
 3. all_value_cols
-   → ALL numeric columns worth analyzing — aim for 2-4
-   → EXCLUDE: id numbers, room numbers, phone numbers, zip codes
-   → INCLUDE: age, score, rating, count, quantity — even if integers
+   → ALL numeric columns worth analyzing — include as many as meaningful
+   → INCLUDE: any numeric column that reveals performance, size, cost, quantity
+   → EXCLUDE: id numbers, room numbers, phone numbers, zip codes, row index columns
 
 4. category_col
-   → PRIMARY grouping column — most analytically useful
+   → PRIMARY grouping column — most analytically useful for GROUP BY
 
 5. all_category_cols
-   → MOST IMPORTANT FIELD — minimum 4-6 columns, aim for 5-8
-   → INCLUDE any column where:
-      * unique values are between 2 and 100
-      * OR unique values list shows short labels/words/codes
-      * examples: Gender, Status, Type, Result, Grade, Level,
-        Region, Department, Category, Blood Type, Condition,
-        Outcome, Rating, Priority, Stage — anything for GROUP BY
-   → EXCLUDE only:
-     * full person names, email addresses, street addresses, URLs
-     * Quality/rating labels applied to products: POOR/GOOD/EXCELLENT, 
-       LOW/MEDIUM/HIGH when describing product quality scores
-     * Derived metric categories that don't make business sense for GROUP BY
-       e.g. "Retention Value: POOR/GOOD" — this is a quality label, not a category
-   → INCLUDE:
-     * Institution names, company names, hospital names
-     * Geographic groupings: city, country, region
-     * Business categories: product type, department, status
-     * Medical/HR categories: condition, blood type, admission type
-   → RULE: Ask yourself "Does grouping by this column give meaningful business insight?"
-     If YES → include. If NO → skip_cols.
+   → Columns with 2-100 unique values that make meaningful GROUP BY groups
+   → INCLUDE: any column where grouping gives business insight
+     (type, status, level, grade, region, department, condition, gender)
+   → EXCLUDE:
+     * Derived quality labels that describe a numeric metric
+       e.g. if a column contains POOR/GOOD/EXCELLENT as labels for another
+       numeric column → skip it, it adds no GROUP BY value
+     * Full person names, email addresses, street addresses, URLs
 
-6. id_col
-   → unique row identifier — unique count close to total rows
+6. high_cardinality_cols
+   → Columns where unique count > 50% of total rows
+   → Too many unique values to GROUP BY — but important for exact lookup queries
+   → e.g. product names, model names, hospital names, drug names, job titles
+   → These will be used when user asks "show me all X" or "list each X"
 
-7. skip_cols
-   → ONLY these: full names, email addresses, street addresses, URLs
-   → DO NOT skip columns with 2-100 unique categorical values
-   → DO NOT skip columns just because they seem less important
+7. id_col
+   → True unique row identifier — unique count equals total rows
+   → e.g. patient ID, order ID, employee ID
 
-8. domain → what kind of dataset is this?
+8. skip_cols
+   → ONLY: email addresses, street addresses, URLs, phone numbers
+   → Do NOT skip product names, model names, or entity names
 
-KEY INSIGHT: Look at the "unique values" list provided for each column.
-If you see short repeating labels like Normal/Abnormal/Inconclusive,
-Yes/No, Male/Female, Active/Inactive — that column is a CATEGORY,
-not a skip column."""
+9. domain
+   → What kind of dataset is this?
+
+DECISION RULES:
+- unique_count > 50% of total rows AND column is a name/label → high_cardinality_cols
+- unique_count = 100% of total rows → id_col
+- unique_count between 2-100 AND meaningful grouping → all_category_cols
+- numeric AND analytically meaningful → all_value_cols
+- POOR/GOOD/EXCELLENT as quality label for another column → skip_cols
+- dates/timestamps → date_col
+"""
 
 
 def _build_schema(df: pd.DataFrame) -> str:
@@ -125,7 +125,7 @@ def _validate_against_df(result: dict, df: pd.DataFrame) -> dict:
     for key in ["date_col", "value_col", "category_col", "id_col"]:
         if result.get(key) not in actual_cols:
             result[key] = None
-    for key in ["all_value_cols", "all_category_cols", "skip_cols"]:
+    for key in ["all_value_cols", "all_category_cols", "skip_cols", "high_cardinality_cols"]:
         result[key] = [
             col for col in result.get(key, [])
             if col in actual_cols
@@ -162,17 +162,23 @@ def _fallback_result(df: pd.DataFrame) -> dict:
     )
     category_col = all_cats[0] if all_cats else None
 
+    all_high_card = [
+        c for c in text_cols
+        if df[c].nunique() > len(df) * 0.5
+    ]
+
     return {
-        "date_col":          None,
-        "value_col":         value_col,
-        "all_value_cols":    [value_col] if value_col else [],
-        "category_col":      category_col,
-        "all_category_cols": all_cats[:8],
-        "id_col":            None,
-        "skip_cols":         [],
-        "domain":            "other",
-        "confidence":        0.40,
-        "source":            "fallback",
+        "date_col":              None,
+        "value_col":             value_col,
+        "all_value_cols":        [value_col] if value_col else [],
+        "category_col":          category_col,
+        "all_category_cols":     all_cats[:8],
+        "high_cardinality_cols": all_high_card,
+        "id_col":                None,
+        "skip_cols":             [],
+        "domain":                "other",
+        "confidence":            0.40,
+        "source":                "fallback",
         "category_unique_values": (
             int(df[category_col].nunique()) if category_col else None
         ),
@@ -204,6 +210,30 @@ def detect_columns(df: pd.DataFrame, use_llm_fallback: bool = True) -> dict:
             int(df[result["category_col"]].nunique())
             if result.get("category_col") else None
         )
+
+        # post-process: remove derived quality labels from categories
+        # e.g. Retention Value (POOR/GOOD), HP Level might be ok but
+        # columns with only 2-3 values like POOR/GOOD/EXCELLENT are quality labels
+        clean_cats = []
+        for col in result.get("all_category_cols", []):
+            if col not in df.columns:
+                continue
+            unique_vals = df[col].dropna().unique().tolist()
+            unique_str  = [str(v).upper().strip() for v in unique_vals]
+            # skip if all values are quality labels
+            quality_labels = {"POOR", "GOOD", "EXCELLENT", "FAIR",
+                              "BAD", "AVERAGE", "LOW", "HIGH", "MEDIUM"}
+            if all(v in quality_labels for v in unique_str):
+                if col not in result.get("skip_cols", []):
+                    result.setdefault("skip_cols", []).append(col)
+                continue
+            clean_cats.append(col)
+        result["all_category_cols"] = clean_cats
+
+        # update category_col if it was removed
+        if result.get("category_col") not in clean_cats:
+            result["category_col"] = clean_cats[0] if clean_cats else None
+
         return result
 
     except Exception as e:
@@ -235,7 +265,8 @@ if __name__ == "__main__":
     print(f"all_value_cols:    {result['all_value_cols']}")
     print(f"category_col:      {result['category_col']}")
     print(f"all_category_cols: {result['all_category_cols']}")
-    print(f"id_col:            {result['id_col']}")
-    print(f"skip_cols:         {result['skip_cols']}")
+    print(f"id_col:                {result['id_col']}")
+    print(f"high_cardinality_cols: {result.get('high_cardinality_cols', [])}")
+    print(f"skip_cols:             {result['skip_cols']}")
     if result.get("llm_error"):
         print(f"\nLLM Error: {result['llm_error']}")

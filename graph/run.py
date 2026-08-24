@@ -52,6 +52,15 @@ def print_trace(final_state: dict):
     print(f"  Confidence:  {final_state['critic_history'][-1].confidence_score * 100:.0f}%")
     print(f"  Rows used:   {final_state['critic_history'][-1].rows_validated}")
 
+import asyncio
+
+async def run_analysis_async(state: dict) -> dict:
+    """
+    Async wrapper — runs workflow.invoke in a thread pool
+    so the event loop (and Streamlit UI) stays responsive.
+    """
+    return await asyncio.to_thread(workflow.invoke, state)
+
 
 if __name__ == "__main__":
     question     = input("\nAsk a question about your data: ").strip()

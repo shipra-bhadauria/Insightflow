@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: insightflow-dashboard
+    runtime: docker
+    dockerfilePath: ./dockerfile
+    dockerContext: .
+    plan: free
+    dockerCommand: streamlit run ui/app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MODEL_ROUTING
+        value: gpt-4o-mini
+      - key: MODEL_REASONING
+        value: gpt-4o
+      - key: OUTPUT_DIR
+        value: outputs

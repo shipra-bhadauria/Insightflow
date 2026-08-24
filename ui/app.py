@@ -15,7 +15,7 @@ load_dotenv()
 
 # ── page config ──────────────────────────────────────────────
 st.set_page_config(
-    page_title="InsightFlow",
+    page_title="INSIGHTFLOW",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -51,6 +51,20 @@ st.markdown("""
         font-weight: 700 !important;
     }
 
+    /* chat sidebar past chat buttons — grey */
+    [data-testid="column"] [data-testid="stButton"] button {
+        background-color: #0f150f !important;
+        color: #4a6a4a !important;
+        border: 1px solid #1e2a1e !important;
+        font-weight: 400 !important;
+        font-size: 10px !important;
+    }
+    [data-testid="column"] [data-testid="stButton"] button:hover {
+        background-color: #1a2a1a !important;
+        color: #c5f432 !important;
+        border-color: #2a4a2a !important;
+    }
+
     /* metric cards */
     [data-testid="stMetric"] {
         background-color: #0c110c;
@@ -61,6 +75,47 @@ st.markdown("""
 
     /* divider */
     hr { border-color: #1e2a1e !important; }
+
+    /* left right panel font */
+    section[data-testid="stSidebar"] .stMarkdown p,
+    div[data-testid="stMarkdownContainer"] p {
+        font-size: 14px !important;
+        line-height: 1.8 !important;
+    }
+    div[data-testid="stMarkdownContainer"] div {
+        font-size: 13px !important;
+        line-height: 1.7 !important;
+    }
+    div[data-testid="stMarkdownContainer"] span {
+        font-size: 13px !important;
+    }
+
+           /* tab colors */
+    button[data-baseweb="tab"][aria-selected="true"] {
+        color: #c5f432 !important;
+        border-bottom: 3px solid #c5f432 !important;
+        font-size: 13px !important;
+        font-weight: 700 !important;
+        letter-spacing: .08em !important;
+        padding: 12px 24px !important;
+        background: transparent !important;
+    }
+    button[data-baseweb="tab"] {
+        color: #3a5a3a !important;
+        font-size: 12px !important;
+        font-weight: 500 !important;
+        letter-spacing: .08em !important;
+        padding: 12px 20px !important;
+        border-bottom: 3px solid transparent !important;
+        background: transparent !important;
+    }
+    button[data-baseweb="tab"]:hover {
+        color: #6a8a6a !important;
+        background: transparent !important;
+    }
+    div[role="tablist"] {
+        border-bottom: 1px solid #1e2a1e !important;
+    }
 
     /* file uploader */
     [data-testid="stFileUploader"] {
@@ -138,9 +193,9 @@ with col_logo:
 with col_title:
     st.markdown("""
     <div style="margin-top:4px">
-        <span style="color:#c5f432;font-size:20px;font-weight:700;
-        font-family:JetBrains Mono,monospace">InsightFlow</span>
-        <span style="color:#3a5a3a;font-size:11px;margin-left:12px">
+        <span style="color:#c5f432;font-size:26px;font-weight:800;
+        letter-spacing:.15em;font-family:JetBrains Mono,monospace">INSIGHTFLOW</span>
+        <span style="color:#3a5a3a;font-size:11px;margin-left:14px">
         Plan · Execute · Critique — an analyst agent that checks its own work</span>
     </div>
     """, unsafe_allow_html=True)
@@ -158,23 +213,24 @@ with col_file:
 st.markdown("<hr>", unsafe_allow_html=True)
 
 
-# ── three panel layout ────────────────────────────────────────
-left, center, right = st.columns([0.8, 3.5, 1.2])
+# ── tab layout ────────────────────────────────────────
+tab_analysis, tab_chat = st.tabs(["📊 ANALYSIS", "💬 CHAT"])
 
+with tab_analysis:
+    left, center, right = st.columns([1, 3.2, 1])
 
-# ── LEFT PANEL ────────────────────────────────────────────────
-with left:
-    from ui.left_panel import render_left_panel
-    render_left_panel()
+    with left:
+        from ui.left_panel import render_left_panel
+        render_left_panel()
 
+    with center:
+        from ui.center_panel import render_center_panel
+        render_center_panel()
 
-# ── CENTER PANEL ──────────────────────────────────────────────
-with center:
-    from ui.center_panel import render_center_panel
-    render_center_panel()
+    with right:
+        from ui.right_panel import render_right_panel
+        render_right_panel()
 
-
-# ── RIGHT PANEL ───────────────────────────────────────────────
-with right:
-    from ui.right_panel import render_right_panel
-    render_right_panel()
+with tab_chat:
+    from ui.chat_panel import render_chat_panel
+    render_chat_panel()

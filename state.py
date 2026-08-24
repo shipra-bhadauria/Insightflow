@@ -22,7 +22,7 @@ class AnalysisAttempt(BaseModel):
     tool_args:      dict = Field(...)
     tool_result:    dict = Field(...)
     chart_path:     Optional[str] = Field(None)
-    chart_paths:    list[str] = Field(default_factory=list)  # add this
+    chart_paths:    list = Field(default_factory=list)
 
 
 class CriticVerdict(BaseModel):
@@ -113,6 +113,7 @@ class InsightFlowState(TypedDict):
 
     # final output
     final_report: Optional[str]
+    follow_up_questions: list
     approved_by_human: bool
 
 
@@ -122,7 +123,7 @@ def new_state(
     document_paths: list[str] = None,
     source_type: str = "csv",
     mode: str = "single",
-    max_attempts: int = 3,
+    max_attempts: int = 1,
 ) -> InsightFlowState:
     return InsightFlowState(
         question=question,
@@ -146,6 +147,7 @@ def new_state(
         max_attempts=max_attempts,
         next_agent="planner",
         final_report=None,
+        follow_up_questions=[],
         approved_by_human=False,
         trace=[f"SYSTEM: new run started — question: '{question}' — mode: {mode}"],
     )

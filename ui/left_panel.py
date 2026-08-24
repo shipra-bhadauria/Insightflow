@@ -178,6 +178,25 @@ def render_left_panel():
                     unsafe_allow_html=True
                 )
 
+                            # ── high cardinality columns ───────────────────────────────────────
+            high_card = detected.get("high_cardinality_cols", [])
+            if high_card:
+                st.markdown("""
+                <div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;
+                color:#3a5a3a;margin-bottom:6px;margin-top:6px">Lookup columns</div>
+                """, unsafe_allow_html=True)
+
+                hc_html = "".join(
+                    f'<span style="display:inline-block;background:#0f1f0f;'
+                    f'border:1px solid #3a2a1e;border-radius:3px;padding:2px 6px;'
+                    f'margin:2px;font-size:9px;color:#ca8a4a">{col}</span>'
+                    for col in high_card
+                )
+                st.markdown(
+                    f'<div style="margin-bottom:8px">{hc_html}</div>',
+                    unsafe_allow_html=True
+                )
+
             # ── domain badge ───────────────────────────────────────────────────
             domain = detected.get("domain")
             if domain and domain != "other":
@@ -254,13 +273,13 @@ def _render_file_overview():
     <div style="background:#0a0e0a;border:1px solid #1a2a1a;
     border-radius:8px;padding:10px;margin-bottom:8px">
         <div style="font-size:10px;color:#8aaa8a;line-height:1.6">
-            {overview['about']}
+            {(overview or {}).get('about', '')}
         </div>
     </div>
     """, unsafe_allow_html=True)
 
     # ── suggested questions ────────────────────────────────────────────────────
-    suggestions = overview.get("suggestions", [])
+    suggestions = (overview or {}).get("suggestions", [])
     if suggestions:
         st.markdown("""
         <div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;

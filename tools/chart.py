@@ -4,6 +4,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import os
 
+try:
+    import plotly.express as px
+    _PLOTLY_AVAILABLE = True
+except ImportError:
+    _PLOTLY_AVAILABLE = False
+
 
 def make_chart(
     df: pd.DataFrame,
@@ -11,7 +17,8 @@ def make_chart(
     x: str,
     y: str,
     title: str = "",
-    output_dir: str = "outputs"
+    output_dir: str = "outputs",
+    agg: str = "sum",   # sum / mean / count
 ) -> dict:
 
     df = df.copy()
@@ -51,23 +58,35 @@ def make_chart(
     # ── chart types ───────────────────────────────────────────────────────────
 
     if kind == "bar":
-        plot_data = df.groupby(x)[y].sum().sort_values(ascending=False)
+        if agg == "mean":
+            plot_data = df.groupby(x)[y].mean().sort_values(ascending=False)
+        elif agg == "count":
+            plot_data = df.groupby(x)[y].count().sort_values(ascending=False)
+        else:
+            plot_data = df.groupby(x)[y].sum().sort_values(ascending=False)
         if len(plot_data) > 10:
             plot_data = plot_data.head(10)
         bars = ax.bar(plot_data.index, plot_data.values, color="#c5f432")
-        ax.bar_label(bars, fmt="{:,.0f}", padding=4, color="#c5f432", fontsize=8)
+        max_val = plot_data.max() if len(plot_data) > 0 else 1
+        fmt = "{:,.2f}" if max_val < 100 else "{:,.0f}"
+        ax.bar_label(bars, fmt=fmt, padding=4, color="#c5f432", fontsize=8)
         if len(plot_data) > 5:
             plt.xticks(rotation=30, ha="right")
 
-    elif kind == "line":
-        if x in df.columns:
-            df[x] = pd.to_datetime(df[x], errors="coerce")
-            df = df.dropna(subset=[x]).sort_values(x)
-            ax.plot(df[x], df[y], color="#c5f432", linewidth=2, marker="o", markersize=4)
-            ax.fill_between(df[x], df[y], alpha=0.1, color="#c5f432")
-        else:
-            ax.plot(df[y], color="#c5f432", linewidth=2, marker="o", markersize=4)
-
+        elif kind == "line":
+            if x in df.columns:
+                df[x] = pd.to_datetime(df[x], errors="coerce")
+                df = df.dropna(subset=[x]).sort_values(x)
+                df = df.groupby(x)[y].mean().reset_index()
+                ax.plot(df[x], df[y], color="#c5f432", linewidth=2, marker="o", markersize=4)
+                ax.fill_between(df[x], df[y], alpha=0.1, color="#c5f432")
+                import matplotlib.dates as mdates
+                ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+                ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+                plt.xticks(rotation=30, ha="right")
+            else:
+                ax.plot(df[y], color="#c5f432", linewidth=2, marker="o", markersize=4)
+                
     elif kind == "area":
         if x in df.columns:
             try:
@@ -107,10 +126,17 @@ def make_chart(
 
     else:
         # fallback to bar
-        plot_data = df.groupby(x)[y].sum().sort_values(ascending=False)
+        #plot_data = df.groupby(x)[y].sum().sort_values(ascending=False)
+        if agg == "mean":
+            plot_data = df.groupby(x)[y].mean().sort_values(ascending=False).head(8)
+        elif agg == "count":
+            plot_data = df.groupby(x)[y].count().sort_values(ascending=False).head(8)
+        else:
+            plot_data = df.groupby(x)[y].sum().sort_values(ascending=False).head(8)
         bars = ax.bar(plot_data.index, plot_data.values, color="#c5f432")
-        ax.bar_label(bars, fmt="{:,.0f}", padding=4, color="#c5f432", fontsize=8)
-
+        max_val = plot_data.max() if len(plot_data) > 0 else 1
+        fmt = "{:,.2f}" if max_val < 100 else "{:,.0f}"
+        ax.bar_label(bars, fmt=fmt, padding=4, color="#c5f432", fontsize=8)
     # ── styling ───────────────────────────────────────────────────────────────
 
     chart_title = title or f"{kind} — {y} by {x}"
@@ -141,6 +167,89 @@ def make_chart(
         "chart_path": chart_path,
         "rows_used":  len(df),
     }
+
+
+def make_plotly_chart(
+    df: pd.DataFrame,
+    kind: str,
+    x: str,
+    y: str,
+    title: str = "",
+    agg: str = "sum",
+):
+    """Interactive Plotly chart — returns fig for st.plotly_chart()"""
+    if not _PLOTLY_AVAILABLE:
+        return None
+
+    df = df.copy()
+    existing = [c for c in [x, y] if c in df.columns]
+    if existing:
+        df = df.dropna(subset=existing)
+    if y in df.columns:
+        df[y] = pd.to_numeric(df[y], errors="coerce")
+        df = df.dropna(subset=[y])
+
+    if len(df) == 0:
+        return None
+
+    chart_title = title or f"{y} by {x}"
+
+    try:
+        if kind == "bar":
+            if agg == "mean":
+                plot_data = df.groupby(x)[y].mean().sort_values(ascending=False).head(20).reset_index()
+            elif agg == "count":
+                plot_data = df.groupby(x)[y].count().sort_values(ascending=False).head(20).reset_index()
+            else:
+                plot_data = df.groupby(x)[y].sum().sort_values(ascending=False).head(20).reset_index()
+            fig = px.bar(plot_data, x=x, y=y, title=chart_title,
+                         color_discrete_sequence=["#c5f432"],
+                         template="plotly_dark")
+
+        elif kind == "line":
+            df[x] = pd.to_datetime(df[x], errors="coerce")
+            df = df.dropna(subset=[x]).sort_values(x)
+            plot_data = df.groupby(x)[y].mean().reset_index()
+            fig = px.line(plot_data, x=x, y=y, title=chart_title,
+                          color_discrete_sequence=["#c5f432"],
+                          template="plotly_dark")
+
+        elif kind == "pie":
+            if agg == "count":
+                plot_data = df.groupby(x)[y].count().reset_index()
+            else:
+                plot_data = df.groupby(x)[y].sum().reset_index()
+            plot_data = plot_data.nlargest(8, y)
+            fig = px.pie(plot_data, names=x, values=y, title=chart_title,
+                         template="plotly_dark")
+
+        elif kind == "scatter":
+            fig = px.scatter(df, x=x, y=y, title=chart_title,
+                             color_discrete_sequence=["#c5f432"],
+                             template="plotly_dark")
+
+        elif kind == "histogram":
+            fig = px.histogram(df, x=x if x in df.columns else y,
+                               title=chart_title,
+                               color_discrete_sequence=["#c5f432"],
+                               template="plotly_dark")
+
+        else:
+            plot_data = df.groupby(x)[y].sum().reset_index()
+            fig = px.bar(plot_data, x=x, y=y, title=chart_title,
+                         template="plotly_dark")
+
+        fig.update_layout(
+            paper_bgcolor="#0a0e0a",
+            plot_bgcolor="#0a0e0a",
+            font_color="#c5f432",
+            title_font_color="#c5f432",
+        )
+        return fig
+
+    except Exception as e:
+        print(f"[plotly] chart error: {e}")
+        return None
 
 
 if __name__ == "__main__":

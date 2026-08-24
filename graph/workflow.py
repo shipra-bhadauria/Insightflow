@@ -12,8 +12,14 @@ from agents.retrieval import retrieval_node
 
 
 def route_after_critic(state: InsightFlowState) -> str:
-    # reads next_agent from state — set by the Critic
     return state["next_agent"]
+
+
+def hitl_node(state: InsightFlowState) -> dict:
+    """HITL checkpoint — UI handles approve/reject via buttons."""
+    return {
+        "approved_by_human": False,
+    }
 
 
 def build_graph() -> StateGraph:
@@ -25,22 +31,24 @@ def build_graph() -> StateGraph:
     graph.add_node("analyst",   analyst_node)
     graph.add_node("critic",    critic_node)
     graph.add_node("reporter",  reporter_node)
+    graph.add_node("hitl",      hitl_node)
 
     graph.add_edge("planner",   "retrieval")
     graph.add_edge("retrieval", "analyst")
     graph.add_edge("analyst",   "critic")
 
-    # conditional edge after Critic — this is the retry loop
     graph.add_conditional_edges(
         "critic",
         route_after_critic,
         {
-            "analyst":  "analyst",   # rejected — retry
-            "reporter": "reporter",  # approved — move forward
+            "analyst":  "analyst",
+            "reporter": "reporter",
         }
     )
 
-    # start at Planner
+    graph.add_edge("reporter", "hitl")
+    graph.add_edge("hitl",     END)
+
     graph.set_entry_point("planner")
 
     return graph.compile()

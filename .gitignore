@@ -14,9 +14,19 @@ outputs/
 !screenshots/*.png
 *.pdf
 
-# FAISS index files
+# FAISS / vector store index files
 memory/*.faiss
 memory/*.pkl
+memory/faiss_index.bin
+memory/faiss_metadata.json
+memory/chroma_db/
+
+# Runtime-generated
+cache/
+logs/
+credentials/
+data/chat_sessions.json
+*.mp3
 
 # OS
 .DS_Store

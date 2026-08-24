@@ -5,6 +5,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pandas as pd
 
 from dotenv import load_dotenv
+from logger import agent_logger as logger
 
 from state import InsightFlowState, AnalysisAttempt, PlanStep
 from tools.describe  import describe_data
@@ -44,11 +45,12 @@ def _load_dataframe(dataset_path: str) -> pd.DataFrame:
 
 
 def _safe_chart(df: pd.DataFrame, kind: str, x: str, y: str,
-                title: str = "", output_dir: str = "outputs") -> dict:
+                title: str = "", output_dir: str = "outputs",
+                agg: str = "sum") -> dict:
     """Safe chart call — returns None chart_path instead of crashing."""
     try:
         return make_chart(df, kind=kind, x=x, y=y,
-                          title=title, output_dir=output_dir)
+                          title=title, output_dir=output_dir, agg=agg)
     except Exception as e:
         return {"chart_path": None, "note": str(e)}
 
@@ -87,9 +89,9 @@ def _build_dashboard_steps(df: pd.DataFrame,
         steps.append(("make_chart", {
             "kind": chart_kind,
             "x":    cat,
-            "y":    "count",
+            "y":    cat,       # ← count chart ke liye same col
+            "agg":  "count",   # ← agg explicitly pass karo
         }))
-
     # ── STEP 3 — For each category: MEAN of each numeric column ───────────────
     for cat in cat_cols[:2]:   # limit to 4 categories for mean
         for val in value_cols[:1]:
@@ -106,6 +108,7 @@ def _build_dashboard_steps(df: pd.DataFrame,
                 "kind": chart_kind,
                 "x":    cat,
                 "y":    val,
+                "agg":  "mean",
             }))
 
     # ── STEP 4 — Numeric distributions ───────────────────────────────────────
@@ -161,53 +164,34 @@ def _call_tool(tool_name: str, df: pd.DataFrame,
     if tool_name == "describe_data":
         return tool_fn(df)
 
-    # make_chart — smart DataFrame building
-    if tool_name == "make_chart" and previous_results:
+    # make_chart — seedha df se chart banao
+    if tool_name == "make_chart":
         chart_x    = tool_args.get("x", "")
         chart_y    = tool_args.get("y", "")
-        best_match = None
+        chart_kind = tool_args.get("kind", "bar")
+        chart_agg  = tool_args.get("agg", "sum")
 
-        for key, prev in reversed(list(previous_results.items())):
-            if "aggregate" in key and isinstance(prev, dict) and "result" in prev:
-                if (prev.get("group_by") == chart_x or
-                        prev.get("value_col") == chart_y or
-                        prev.get("group_by") == chart_x):
-                    best_match = prev
-                    break
+        # seedha df se chart — sab se reliable
+        if chart_x in df.columns and chart_y in df.columns:
+            n_unique = df[chart_x].nunique() if chart_x in df.columns else 999
+            if chart_kind == "pie" and (n_unique > 8 or chart_agg not in ("count", None)):
+                chart_kind = "bar"
+            return _safe_chart(df, kind=chart_kind,
+                               x=chart_x, y=chart_y, agg=chart_agg)
 
-        if not best_match:
+        # raw result list se chart
+        if previous_results:
             for key, prev in reversed(list(previous_results.items())):
-                if "aggregate" in key and isinstance(prev, dict) and "result" in prev:
-                    best_match = prev
-                    break
+                if "aggregate" not in key or not isinstance(prev, dict):
+                    continue
+                res = prev.get("result")
+                if isinstance(res, list) and res:
+                    raw_df = pd.DataFrame(res)
+                    if chart_x in raw_df.columns and chart_y in raw_df.columns:
+                        return _safe_chart(raw_df, kind=chart_kind,
+                                           x=chart_x, y=chart_y, agg="mean")
 
-        if best_match and isinstance(best_match.get("result"), dict):
-            try:
-                grp = best_match["group_by"]
-                val = best_match["value_col"]
-
-                # count analysis — value_col same as group_by
-                if grp == val:
-                    agg_df = pd.DataFrame(
-                        list(best_match["result"].items()),
-                        columns=[grp, "count"]
-                    )
-                    tool_args = tool_args.copy()
-                    tool_args["y"] = "count"
-                else:
-                    agg_df = pd.DataFrame(
-                        list(best_match["result"].items()),
-                        columns=[grp, val]
-                    )
-
-                return _safe_chart(
-                    agg_df,
-                    kind=tool_args.get("kind", "bar"),
-                    x=tool_args.get("x", grp),
-                    y=tool_args.get("y", val),
-                )
-            except Exception:
-                pass
+        return {"chart_path": None, "note": "No data for chart"}
 
     # trend_over_time chart — use trend result
     if tool_name == "make_chart" and previous_results:
@@ -268,6 +252,8 @@ def _run_steps(df: pd.DataFrame, steps: list,
 
 
 def analyst_node(state: InsightFlowState) -> dict:
+    attempts = state.get("attempts", 0)
+    logger.info(f"Analyst | attempt={attempts + 1}")
 
     plan             = state["plan"]
     attempts         = state["attempts"]
@@ -296,17 +282,24 @@ def analyst_node(state: InsightFlowState) -> dict:
             df, plan_steps, critic_feedback=critic_feedback
         )
 
-    # combine results
+    # combine results — ensure all values are JSON serializable
     combined_result = {}
     for r in all_results:
         key = r["tool"]
-        # avoid overwriting — append index if duplicate
         if key in combined_result:
             i = 2
             while f"{key}_{i}" in combined_result:
                 i += 1
             key = f"{key}_{i}"
-        combined_result[key] = r["result"]
+        result_val = r["result"]
+        # convert result list to dict wrapper so Pydantic is happy
+        if isinstance(result_val, dict) and isinstance(result_val.get("result"), list):
+            result_val = {
+                **{k: v for k, v in result_val.items() if k != "result"},
+                "result": result_val["result"],
+                "result_count": len(result_val["result"]),
+            }
+        combined_result[key] = result_val
 
     attempt_number = attempts + 1
     chart_path     = chart_paths[0] if chart_paths else None

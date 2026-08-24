@@ -1,0 +1,42 @@
+[
+  {
+    "id": "car-001",
+    "question": "What is the total unit sales per manufacturer?",
+    "dataset": "dashboards Car_Sales_Kaggle_DV0130EN_Lab3_Start.xlsx",
+    "expected_tool": "aggregate",
+    "expected_keywords": ["Ford", "Dodge", "Toyota", "unit sales", "manufacturer"],
+    "expected_min_confidence": 0.80
+  },
+  {
+    "id": "car-002",
+    "question": "Which model has the highest price?",
+    "dataset": "dashboards Car_Sales_Kaggle_DV0130EN_Lab3_Start.xlsx",
+    "expected_tool": "aggregate",
+    "expected_keywords": ["price", "model", "highest"],
+    "expected_min_confidence": 0.75
+  },
+  {
+    "id": "car-003",
+    "question": "What is the average horsepower by vehicle type?",
+    "dataset": "dashboards Car_Sales_Kaggle_DV0130EN_Lab3_Start.xlsx",
+    "expected_tool": "aggregate",
+    "expected_keywords": ["horsepower", "vehicle", "average"],
+    "expected_min_confidence": 0.75
+  },
+  {
+    "id": "car-004",
+    "question": "Are there any anomalies in unit sales?",
+    "dataset": "dashboards Car_Sales_Kaggle_DV0130EN_Lab3_Start.xlsx",
+    "expected_tool": "detect_anomaly",
+    "expected_keywords": ["anomaly", "outlier", "unusual"],
+    "expected_min_confidence": 0.70
+  },
+  {
+    "id": "car-005",
+    "question": "What if unit sales increase by 10%?",
+    "dataset": "dashboards Car_Sales_Kaggle_DV0130EN_Lab3_Start.xlsx",
+    "expected_tool": "what_if",
+    "expected_keywords": ["10%", "increase", "impact", "unit sales"],
+    "expected_min_confidence": 0.70
+  }
+]

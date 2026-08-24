@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from dotenv import load_dotenv
 
 from state import InsightFlowState, PlanStep
+from logger import agent_logger as logger
 
 load_dotenv()
 
@@ -30,16 +31,18 @@ Available tools:
 - detect_anomaly   — find outliers in a numeric column using IQR
 - correlate        — Pearson correlation between two numeric columns
 - make_chart       — save a matplotlib chart
-- what_if          — simulate % change impact
+- what_if          — simulate % change impact on a numeric column
+- forecast         — predict future values using Prophet (needs date_col)
 
 CHART SELECTION RULES — follow strictly:
-- category with <= 8 unique values → pie chart
-- category with > 8 unique values  → bar chart (TOP 10 ONLY)
-- time series (date column)        → line chart
-- correlation results              → scatter chart
-- distribution/anomaly             → histogram
+- COUNT analysis → pie chart if <=8 unique values, bar chart if >8
+- MEAN/SUM/MIN/MAX analysis → ALWAYS bar chart (NEVER pie for numeric aggregations)
+- time series (date column) → line chart
+- correlation results → scatter chart
+- distribution/anomaly → histogram
 - USE VARIETY — never use same chart type for every step
 - NEVER use columns from DO NOT USE list
+- NEVER use pie chart for mean, sum, min, max — only for count
 
 make_chart argument names: kind (bar/line/scatter/histogram/pie/area), x, y
 
@@ -110,17 +113,57 @@ IMPORTANT RULES FOR DASHBOARD:
 - Do not repeat same group_by + value_col + agg combination
 
 SINGLE QUESTION MODE:
-SINGLE QUESTION MODE:
 Create a focused 2-4 step plan that directly answers the question.
 
 SINGLE MODE RULES:
-- Read question carefully — understand what is being asked
-- If question asks RELATION between 2 categorical columns:
-  → aggregate(group_by=[col1, col2], value_col=col1, agg="count")
-  → This gives count of records for each combination
+- Read the question carefully — understand exactly what is being asked
+- CRITICAL: Only use numeric columns if the question EXPLICITLY mentions a metric
+  (average, total, sum, count of something numeric, or names a specific numeric column)
+- If question only mentions category column names with no numeric intent → use count only
+  aggregate(group_by=category_col, value_col=category_col, agg="count")
+- If question asks FORECAST / PREDICTION / TREND ahead:
+  → forecast(date_col=date_col, value_col=numeric_col, periods=30)
+  → Keywords: "forecast", "predict", "next month", "future", "projection", "next year"
+  → Only use if date_col exists in schema
+- If question asks ANOMALY / OUTLIER detection:
+  → detect_anomaly(col=numeric_col)
+  → make_chart(kind="histogram", x=numeric_col, y=numeric_col)
+  → Keywords: "anomaly", "outlier", "unusual", "strange", "spike", "irregularity"
+- If question asks WHAT IF / SCENARIO analysis:
+  → what_if(col=numeric_col, change_pct=number)
+  → Keywords: "what if", "if X increases", "scenario", "impact of", "simulate", "% change"
+- If question asks EXACT values / ALL values / EACH row / LIST all:
+  → aggregate(group_by=col, value_col=numeric_col, agg="mean", raw=True)
+  → If multiple numeric columns asked → value_cols=[col1, col2, ...]
+  → Keywords to detect: "exact", "all", "each", "list all", "i want all",
+    "not just average", "per model", "for every"
+- If question mentions ONE category + TWO numeric columns:
+  → Step 1: aggregate(group_by=category, value_col=numeric1, agg="mean")
+  → Step 2: make_chart(kind="bar", x=category, y=numeric1, agg="mean")
+  → Step 3: aggregate(group_by=category, value_col=numeric2, agg="mean")
+  → Step 4: make_chart(kind="bar", x=category, y=numeric2, agg="mean")
+  → MANDATORY: Each numeric column gets its OWN aggregate + chart pair
+  → Keywords: "and", "both", "compare" between two numeric columns
+- If question mentions ONE category + ONE numeric column:
+  → Step 1: aggregate(group_by=category, value_col=numeric, agg="count")
+  → Step 2: make_chart(kind="pie" or "bar", x=category, y=numeric)
+  → Step 3: aggregate(group_by=category, value_col=numeric, agg="mean")
+  → Step 4: make_chart(kind="bar", x=category, y=numeric)
+  → Step 5: aggregate(group_by=category, value_col=numeric, agg="sum")
+  → Step 6: make_chart(kind="bar", x=category, y=numeric)
+  → Step 7: detect_anomaly(col=numeric)
+  → MANDATORY: Every aggregate step MUST be followed by a make_chart step
+  → Use variety: pie for count (<=8 unique), bar for mean/sum
+- If question mentions TWO categories + NO numeric:
+  → Step 1: aggregate(group_by=cat1, value_col=cat1, agg="count")
+  → Step 2: make_chart(kind="pie" or "bar", x=cat1, y=cat1)
+  → Step 3: aggregate(group_by=cat2, value_col=cat2, agg="count")
+  → Step 4: make_chart(kind="pie" or "bar", x=cat2, y=cat2)
+  → Step 5: aggregate(group_by=[cat1, cat2], value_col=cat1, agg="count")
+  → Step 6: make_chart(kind="bar", x=cat1, y=cat2)
 - If question asks DISTRIBUTION of one column:
   → aggregate(group_by=col, value_col=col, agg="count") + chart
-- If question asks HIGHEST/LOWEST:
+- If question asks HIGHEST/LOWEST of a numeric:
   → aggregate(group_by=col, value_col=numeric_col, agg="sum" or "mean")
 - If question asks TREND over time:
   → trend_over_time(date_col, value_col)
@@ -180,9 +223,36 @@ def _parse_json_safely(content: str) -> dict:
 def _validate_args(step_args: dict, actual_columns: list, detected: dict) -> dict:
     column_args = ["group_by", "value_col", "date_col", "col",
                    "col_a", "col_b", "x", "y"]
+    passthrough_args = ["raw", "value_cols", "agg", "freq", "kind",
+                        "change_pct", "dropna"]
     validated = {}
 
+    # agar value_col list hai — convert to value_cols
+    if isinstance(step_args.get("value_col"), list):
+        vc_list = step_args["value_col"]
+        valid_list = [c for c in vc_list if c in actual_columns]
+        if valid_list:
+            step_args = dict(step_args)
+            step_args["value_cols"] = valid_list
+            step_args["value_col"] = valid_list[0]
+            step_args["raw"] = step_args.get("raw", True)
+
     for arg_key, arg_val in step_args.items():
+        # passthrough args — keep as-is
+        if arg_key in passthrough_args:
+            validated[arg_key] = arg_val
+            continue
+
+        # value_cols — list of column names, validate each
+        if arg_key == "value_cols" and isinstance(arg_val, list):
+            validated[arg_key] = [c for c in arg_val if c in actual_columns]
+            continue
+
+        # group_by list — validate each column
+        if arg_key == "group_by" and isinstance(arg_val, list):
+            validated[arg_key] = [c for c in arg_val if c in actual_columns]
+            continue
+
         if isinstance(arg_val, str) and arg_key in column_args:
             if arg_val in actual_columns:
                 validated[arg_key] = arg_val
@@ -209,6 +279,7 @@ def planner_node(state: InsightFlowState) -> dict:
     detected_columns = state["detected_columns"]
     quality_report   = state["quality_report"]
     mode             = state["mode"]
+    logger.info(f"Planner | mode={mode} | question='{question[:50]}'")
 
     # ── build schema context ───────────────────────────────────────────────
     date_col          = detected_columns.get("date_col",          "none")
@@ -219,6 +290,7 @@ def planner_node(state: InsightFlowState) -> dict:
     all_value_cols    = detected_columns.get("all_value_cols",    [])
     domain            = detected_columns.get("domain",            "unknown")
     skip_cols         = detected_columns.get("skip_cols",         [])
+    high_cardinality_cols = detected_columns.get("high_cardinality_cols", [])
 
     # filter skip_cols from categories
     clean_cats = [c for c in all_category_cols if c not in skip_cols]
@@ -228,25 +300,32 @@ def planner_node(state: InsightFlowState) -> dict:
 
     numeric_str = "\n".join(f"  - {col}" for col in all_value_cols) \
                   if all_value_cols else f"  - {value_col}"
+    high_card_str = "\n".join(f"  - {col}" for col in high_cardinality_cols) \
+                if high_cardinality_cols else "  - none"
+
+    # quality_report truncate — large datasets ke liye token limit avoid karo
+    null_counts = quality_report.get('null_counts', {}) if quality_report else {}
+    null_counts_truncated = dict(list(null_counts.items())[:20])
 
     schema_info = f"""Dataset domain: {domain}
 
     Detected columns:
-    - date_col:     {date_col}
-    - value_col:    {value_col}
-    - category_col: {category_col}
-    - id_col:       {id_col}
+    - date_col: {date_col}
+    - id_col:   {id_col}
 
     ALL category columns — use ALL in dashboard mode:
     {categories_str}
 
-    Numeric columns available — use ALL of these:
+    Numeric columns available — use ONLY when question asks for a metric:
     {numeric_str}
+
+    High cardinality columns — use with raw=True for exact lookup queries:
+    {high_card_str}
 
     DO NOT USE these columns — no analytical value:
     {skip_cols}
 
-    All columns in dataset: {list(quality_report['null_counts'].keys()) if quality_report else []}"""
+    All columns in dataset: {list(null_counts_truncated.keys())}"""
 
 
     user_message = f"""Question: {question}
@@ -261,6 +340,23 @@ def planner_node(state: InsightFlowState) -> dict:
     - Single mode: focused 2-4 steps to answer the question
     - Mix chart types — pie, bar, histogram, line, scatter
     - NEVER use DO NOT USE columns
+    - MOST IMPORTANT: If question only mentions category columns and NO numeric metric → use count only
+    - If question mentions two categories → group_by=[cat1, cat2], value_col=cat1, agg=count
+    - RAW LOOKUP RULE: If question contains ANY of these words: "each", "of each", "for each",
+      "per model", "every", "all", "exact", "list", "i want all", "not just average"
+      → MANDATORY: use aggregate with raw=True and value_cols=[list of numeric cols asked]
+      → NEVER use agg=count or agg=mean for raw lookup questions
+      → High cardinality cols (Model, Product, Name) + raw=True = exact per-row table
+    - CHART RULES:
+      → raw=True results → use bar chart with x=group_by col, y=first numeric col
+      → count results → pie if <=8 unique, bar if >8
+      → mean/sum results → ALWAYS bar chart
+      → High cardinality (>20 unique) → NEVER pie chart
+
+    - TWO NUMERIC COLUMNS RULE: If question asks about TWO numeric columns:
+      → MANDATORY: add make_chart step after EACH aggregate step
+      → aggregate(numeric1) → make_chart(numeric1) → aggregate(numeric2) → make_chart(numeric2)
+      → NEVER skip make_chart steps when two numerics asked
 
     Create the analysis plan."""
 
@@ -303,6 +399,7 @@ def planner_node(state: InsightFlowState) -> dict:
         f"PLANNER: {len(plan)} step(s) — "
         + ", ".join(s.tool_to_use for s in plan)
     )
+    logger.info(f"Planner done | steps={len(plan)} | tools={[s.tool_to_use for s in plan]}")
 
     return {
         "plan":       plan,

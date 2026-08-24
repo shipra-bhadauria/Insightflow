@@ -1,39 +1,72 @@
 import sys
 import os
+import base64
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import pytesseract
+from openai import OpenAI
+from dotenv import load_dotenv
 from PIL import Image
-import pandas as pd
-import re
 
+load_dotenv()
 
 def load_image(file_path: str) -> dict:
-
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Image not found: {file_path}")
 
-    # open image
-    img  = Image.open(file_path)
+    img = Image.open(file_path)
     width, height = img.size
     mode = img.mode
 
-    # extract text using OCR
-    raw_text = pytesseract.image_to_string(img)
-    clean_text = raw_text.strip()
+    # VLM Analysis (gpt-4o vision)
+    vlm_description = ""
+    try:
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-    # get word count
-    words = [w for w in clean_text.split() if w.strip()]
+        with open(file_path, "rb") as f:
+            image_data = base64.b64encode(f.read()).decode("utf-8")
+
+        ext = file_path.split(".")[-1].lower()
+        media_type = "image/jpeg" if ext == "jpg" else f"image/{ext}"
+
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{media_type};base64,{image_data}",
+                            "detail": "high",
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "Describe this image in detail. "
+                            "If it contains data, charts, tables, or text — "
+                            "extract and explain all key information. "
+                            "Be specific about numbers, labels, trends, and insights."
+                        ),
+                    },
+                ],
+            }],
+            max_tokens=1000,
+        )
+        vlm_description = response.choices[0].message.content
+    except Exception as e:
+        vlm_description = f"[VLM analysis failed: {e}]"
 
     return {
-        "file_path":  file_path,
-        "width":      width,
-        "height":     height,
-        "mode":       mode,
-        "raw_text":   clean_text,
-        "word_count": len(words),
-        "preview":    clean_text[:500],
-        "source_type": "image",
+        "file_path":       file_path,
+        "width":           width,
+        "height":          height,
+        "mode":            mode,
+        "raw_text":        vlm_description,
+        "word_count":      len(vlm_description.split()),
+        "preview":         vlm_description[:500],
+        "source_type":     "image",
+        "vlm_description": vlm_description,
     }
 
 
