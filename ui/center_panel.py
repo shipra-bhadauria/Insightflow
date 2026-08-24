@@ -436,37 +436,79 @@ def _render_result():
     """, unsafe_allow_html=True)
 
     analysis_hist = final_state.get("analysis_history", [])
-    attempt = analysis_hist[-1] if analysis_hist else None
-    if attempt and attempt.chart_path and os.path.exists(attempt.chart_path):
+
+    charts = []
+    for a in analysis_hist:
+        if hasattr(a, 'chart_paths') and a.chart_paths:
+            for cp in a.chart_paths:
+                if cp and os.path.exists(cp) and cp not in charts:
+                    charts.append(cp)
+        elif getattr(a, "chart_path", None) and os.path.exists(a.chart_path):
+            if a.chart_path not in charts:
+                charts.append(a.chart_path)
+
+    if charts:
         try:
             from tools.chart import make_plotly_chart
-            df = st.session_state.get("df")
+            df   = st.session_state.get("df")
+            figs = []
+            seen = set()
+
+            tool_results_list = []
+            for a in analysis_hist:
+                if hasattr(a, "tool_result") and a.tool_result:
+                    tool_results_list.append(a.tool_result)
+
             if df is not None:
-                fig = None
-                tool_result = attempt.tool_result or {}
-                for key, val in tool_result.items():
-                    if isinstance(val, dict) and "group_by" in val and val.get("group_by"):
-                        grp = val["group_by"]
-                        grp = grp[0] if isinstance(grp, list) else grp
-                        vc  = val.get("value_col", grp)
+                for tool_result in tool_results_list:
+                    for key, val in tool_result.items():
+                        if not isinstance(val, dict):
+                            continue
+                        grp = val.get("group_by")
+                        vc  = val.get("value_col", "")
                         agg = val.get("agg", "sum")
-                        if grp in df.columns:
-                            # count: y = grp, pie if <=8 else bar
-                            y_col = vc if (vc and vc in df.columns and vc != grp) else grp
-                                                        # agar value_col alag hai group_by se toh mean use karo
-                            if y_col != grp and agg == "count":
-                                agg = "mean"
-                            kind  = "pie" if (agg == "count" and df[grp].nunique() <= 8) else "bar"
+                        if not grp:
+                            continue
+                        grp = grp[0] if isinstance(grp, list) else grp
+                        if grp not in df.columns:
+                            continue
+                        y_col = vc if (vc and vc in df.columns and vc != grp) else grp
+                        if y_col != grp and agg == "count":
+                            agg = "mean"
+                        sig = f"{grp}|{y_col}|{agg}"
+                        if sig in seen:
+                            continue
+                        seen.add(sig)
+                        kind = "pie" if (agg == "count" and df[grp].nunique() <= 8) else "bar"
+                        try:
                             fig = make_plotly_chart(df, kind=kind, x=grp, y=y_col, agg=agg)
-                            break
-                if fig is not None:
-                    st.plotly_chart(fig, use_container_width=True)
+                            if fig:
+                                figs.append((y_col, fig))
+                        except Exception:
+                            pass
+
+            if figs:
+                cfg = {"scrollZoom": True, "displayModeBar": True}
+                if len(figs) == 1:
+                    st.plotly_chart(figs[0][1], use_container_width=True, config=cfg, key="single_chart_0")
                 else:
-                    st.image(attempt.chart_path, use_container_width=True)
+                    for i in range(0, len(figs), 2):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.plotly_chart(figs[i][1], use_container_width=True, config=cfg, key=f"single_chart_{i}")
+                        with col2:
+                            if i + 1 < len(figs):
+                                st.plotly_chart(figs[i+1][1], use_container_width=True, config=cfg, key=f"single_chart_{i+1}")
             else:
-                st.image(attempt.chart_path, use_container_width=True)
+                for cp in charts:
+                    if os.path.exists(cp):
+                        st.image(cp, use_container_width=True)
         except Exception:
-            st.image(attempt.chart_path, use_container_width=True)
+            for cp in charts:
+                if os.path.exists(cp):
+                    st.image(cp, use_container_width=True)
+
+    attempt = analysis_hist[-1] if analysis_hist else None
 
     if verdict and getattr(verdict, 'rows_validated', None):
         st.markdown(f"""
