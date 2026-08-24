@@ -25,6 +25,7 @@ logs/
 memory/chroma_db/
 data/chat_sessions.json
 data/~$*
+data/users/
 test_tts.mp3
 *.bundle
 *.tar.gz

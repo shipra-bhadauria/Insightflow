@@ -99,6 +99,17 @@ def _run_analysis(question: str, mode: str):
     from graph.workflow import workflow
     from logger         import ui_logger as logger
     from llm_cache      import get_cached, set_cache
+    import time
+
+    # ── per-user rate limit (5 requests / 60s) ───────────────
+    now  = time.time()
+    reqs = [t for t in st.session_state.get("user_requests", []) if now - t < 60]
+    if len(reqs) >= 5:
+        wait = int(60 - (now - reqs[0]))
+        st.error(f"⏳ Too many requests. Please wait {wait}s before trying again.")
+        return
+    reqs.append(now)
+    st.session_state["user_requests"] = reqs
 
     if st.session_state.get("source_type") in ["pdf", "image"]:
         _run_pdf_analysis(question)

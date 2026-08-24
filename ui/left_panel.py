@@ -20,7 +20,9 @@ def render_left_panel():
         from tools.quality        import run_quality_report
         from tools.detect_columns import detect_columns
 
-        save_path = os.path.join("data", uploaded.name)
+        user_dir  = os.path.join("data", "users", st.session_state.get("user_id", "default"))
+        os.makedirs(user_dir, exist_ok=True)
+        save_path = os.path.join(user_dir, uploaded.name)
         with open(save_path, "wb") as f:
             f.write(uploaded.getbuffer())
 

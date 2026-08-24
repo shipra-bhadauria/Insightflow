@@ -179,6 +179,42 @@ if "final_state"      not in st.session_state: st.session_state.final_state     
 if "running"          not in st.session_state: st.session_state.running          = False
 if "past_analyses"    not in st.session_state: st.session_state.past_analyses    = []
 if "pdf_path" not in st.session_state: st.session_state.pdf_path = None
+if "user_id"          not in st.session_state: st.session_state.user_id          = None
+if "user_requests"    not in st.session_state: st.session_state.user_requests    = []
+
+
+# ── simple username entry (no password) ──────────────────────
+if not st.session_state.user_id:
+    st.markdown("""
+    <div style="text-align:center;margin-top:80px">
+        <div style="background:#c5f432;width:56px;height:56px;border-radius:12px;
+        display:flex;align-items:center;justify-content:center;margin:0 auto 20px;
+        font-weight:800;font-size:26px;color:#0a0e0a">I</div>
+        <span style="color:#c5f432;font-size:28px;font-weight:800;
+        letter-spacing:.15em;font-family:JetBrains Mono,monospace">INSIGHTFLOW</span>
+        <div style="color:#3a5a3a;font-size:12px;margin-top:8px">
+        Enter a name to start your session — your data and chats stay private to you</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_a, col_b, col_c = st.columns([1, 1, 1])
+    with col_b:
+        st.markdown("<div style='margin-top:24px'></div>", unsafe_allow_html=True)
+        name_input = st.text_input(
+            "Your name",
+            placeholder="e.g. shipra",
+            label_visibility="collapsed",
+            key="username_entry",
+        )
+        if st.button("Start →", use_container_width=True):
+            clean = "".join(c for c in name_input.strip().lower() if c.isalnum() or c in ("-", "_"))
+            if clean:
+                st.session_state.user_id = clean
+                st.rerun()
+            else:
+                st.warning("Please enter a valid name (letters/numbers only).")
+    st.stop()
+
 
 # ── top navigation bar ────────────────────────────────────────
 col_logo, col_title, col_file = st.columns([1, 4, 2])
@@ -191,12 +227,14 @@ with col_logo:
     """, unsafe_allow_html=True)
 
 with col_title:
-    st.markdown("""
+    st.markdown(f"""
     <div style="margin-top:4px">
         <span style="color:#c5f432;font-size:26px;font-weight:800;
         letter-spacing:.15em;font-family:JetBrains Mono,monospace">INSIGHTFLOW</span>
         <span style="color:#3a5a3a;font-size:11px;margin-left:14px">
         Plan · Execute · Critique — an analyst agent that checks its own work</span>
+        <span style="color:#4a6a4a;font-size:10px;margin-left:14px">
+        👤 {st.session_state.user_id}</span>
     </div>
     """, unsafe_allow_html=True)
 
