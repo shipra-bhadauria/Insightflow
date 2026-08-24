@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: insightflow
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt"
+    startCommand: "streamlit run ui/app.py --server.port $PORT --server.address 0.0.0.0"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MODEL_ROUTING
+        value: gpt-4o-mini
+      - key: MODEL_REASONING
+        value: gpt-4o-mini
