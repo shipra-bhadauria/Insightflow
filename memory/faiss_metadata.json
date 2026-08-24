@@ -25,5 +25,23 @@
     "rows_validated": 55500,
     "dataset_path": "data/hospital-dataset.xlsx",
     "timestamp": "2026-06-09T23:50:33.321218"
+  },
+  {
+    "id": 3,
+    "question": "How does Fuel Efficiency vary across different Vehicle_types?",
+    "final_report": "**The Finding:** Fuel efficiency varies significantly across different vehicle types. Passenger vehicles have a higher average fuel efficiency of 25.24 miles per gallon, compared to cars, which average 19.7 miles per gallon.\n\n**Why It Matters:** Understanding fuel efficiency differences can guide consumers and manufacturers in making environmentally and economically informed decisions regarding vehicle purchases and production.",
+    "confidence": 0.95,
+    "rows_validated": 155,
+    "dataset_path": "data/dashboards Car_Sales_Kaggle_DV0130EN_Lab3_Start.xlsx",
+    "timestamp": "2026-08-22T14:16:01.172564"
+  },
+  {
+    "id": 4,
+    "question": "Which Manufacturer has the highest Unit Sales?",
+    "final_report": "**The Finding:** Ford leads in unit sales with a total of 2,022,635 units sold, significantly outperforming other manufacturers.\n\n**Why It Matters:** Understanding which manufacturers dominate in unit sales can guide strategic decisions in marketing, partnerships, and inventory management to align with consumer preferences and market trends.",
+    "confidence": 1.0,
+    "rows_validated": 155,
+    "dataset_path": "data/dashboards Car_Sales_Kaggle_DV0130EN_Lab3_Start.xlsx",
+    "timestamp": "2026-08-22T21:11:32.792538"
   }
 ]
