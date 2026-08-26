@@ -58,12 +58,12 @@ def _safe_chart(df: pd.DataFrame, kind: str, x: str, y: str,
 def _build_dashboard_steps(df: pd.DataFrame,
                             detected: dict) -> list:
     """
-    Programmatically build analysis steps for dashboard mode.
-    No LLM — pure logic based on detected columns.
+    Programmatically build 8-12 MEANINGFUL analysis steps for dashboard mode.
+    No LLM — pure logic based on detected columns. Keeps only high-value charts,
+    skips noisy/low-value ones (e.g. per-column trend-over-launch-date lines).
     """
     steps = []
 
-    date_col    = detected.get("date_col")
     value_cols  = detected.get("all_value_cols", [])
     cat_cols    = detected.get("all_category_cols", [])
     skip_cols   = detected.get("skip_cols", [])
@@ -72,15 +72,14 @@ def _build_dashboard_steps(df: pd.DataFrame,
     cat_cols   = [c for c in cat_cols if c not in skip_cols and c in df.columns]
     value_cols = [c for c in value_cols if c in df.columns]
 
-    # ── STEP 1 — describe_data ────────────────────────────────────────────────
+    # ── STEP 1 — describe_data (always first, drives KPI cards) ────────────
     steps.append(("describe_data", {}))
 
-    # ── STEP 2 — For each category: COUNT + chart ─────────────────────────────
-    for cat in cat_cols[:5]:
+    # ── STEP 2 — COUNT chart per category, max 4 categories ────────────────
+    for cat in cat_cols[:4]:
         n_unique = df[cat].nunique()
         chart_kind = "pie" if n_unique <= 8 else "bar"
 
-        # COUNT — how many records per category
         steps.append(("aggregate", {
             "group_by":  cat,
             "value_col": cat,
@@ -89,51 +88,36 @@ def _build_dashboard_steps(df: pd.DataFrame,
         steps.append(("make_chart", {
             "kind": chart_kind,
             "x":    cat,
-            "y":    cat,       # ← count chart ke liye same col
-            "agg":  "count",   # ← agg explicitly pass karo
+            "y":    cat,
+            "agg":  "count",
         }))
-    # ── STEP 3 — For each category: MEAN of each numeric column ───────────────
-    for cat in cat_cols[:2]:   # limit to 4 categories for mean
+
+    # ── STEP 3 — MEAN of primary numeric column, per category, max 2 ───────
+    for cat in cat_cols[:2]:
         for val in value_cols[:1]:
             if cat == val:
                 continue
-            n_unique = df[cat].nunique()
-            chart_kind = "bar"
             steps.append(("aggregate", {
                 "group_by":  cat,
                 "value_col": val,
                 "agg":       "mean",
             }))
             steps.append(("make_chart", {
-                "kind": chart_kind,
+                "kind": "bar",
                 "x":    cat,
                 "y":    val,
                 "agg":  "mean",
             }))
 
-    # ── STEP 4 — Numeric distributions ───────────────────────────────────────
-    for val in value_cols:
+    # ── STEP 4 — Distribution histograms, top 2 numeric columns only ───────
+    for val in value_cols[:2]:
         steps.append(("make_chart", {
             "kind": "histogram",
             "x":    val,
             "y":    val,
         }))
 
-    # ── STEP 5 — Trend over time ──────────────────────────────────────────────
-    if date_col and date_col in df.columns:
-        for val in value_cols:
-            steps.append(("trend_over_time", {
-                "date_col":  date_col,
-                "value_col": val,
-                "freq":      "ME",
-            }))
-            steps.append(("make_chart", {
-                "kind": "line",
-                "x":    date_col,
-                "y":    val,
-            }))
-
-    # ── STEP 6 — Correlate numeric columns ───────────────────────────────────
+    # ── STEP 5 — Correlate top 2 numeric columns ────────────────────────────
     if len(value_cols) >= 2:
         steps.append(("correlate", {
             "col_a": value_cols[0],
@@ -145,11 +129,16 @@ def _build_dashboard_steps(df: pd.DataFrame,
             "y":    value_cols[1],
         }))
 
-    # ── STEP 7 — Anomaly detection ────────────────────────────────────────────
+    # ── STEP 6 — Anomaly detection on primary numeric column ────────────────
     if value_cols:
         steps.append(("detect_anomaly", {
             "col": value_cols[0],
         }))
+
+    # NOTE: trend_over_time/line charts are intentionally SKIPPED here —
+    # a "launch date" style column doesn't give a meaningful time-series
+    # trend and was cluttering the dashboard with 10+ noisy, low-value charts.
+    # Total charts produced: ~9-10 (4 count + 2 mean + 2 histogram + 1 scatter).
 
     return steps
 
