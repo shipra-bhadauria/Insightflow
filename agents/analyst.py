@@ -164,32 +164,48 @@ def _call_tool(tool_name: str, df: pd.DataFrame,
     if tool_name == "describe_data":
         return tool_fn(df)
 
-    # make_chart — seedha df se chart banao
+    # make_chart — pehle-se-aggregated result se safe chart banao
     if tool_name == "make_chart":
         chart_x    = tool_args.get("x", "")
         chart_y    = tool_args.get("y", "")
         chart_kind = tool_args.get("kind", "bar")
         chart_agg  = tool_args.get("agg", "sum")
 
-        # seedha df se chart — sab se reliable
+        # count/mean charts ke liye — pehle previous aggregate result dhoondo
+        if previous_results and chart_agg in ("count", "mean", "sum"):
+            best_match = None
+            for key, prev in reversed(list(previous_results.items())):
+                if "aggregate" not in key or not isinstance(prev, dict):
+                    continue
+                if prev.get("group_by") == chart_x and prev.get("agg") == chart_agg:
+                    best_match = prev
+                    break
+            if best_match and isinstance(best_match.get("result"), dict):
+                try:
+                    grp = best_match["group_by"]
+                    val = best_match["value_col"]
+                    if grp == val:
+                        agg_df = pd.DataFrame(
+                            list(best_match["result"].items()),
+                            columns=[grp, "count"]
+                        )
+                        n_unique = len(agg_df)
+                        use_kind = "pie" if (chart_kind == "pie" and n_unique <= 8) else "bar"
+                        return _safe_chart(agg_df, kind=use_kind, x=grp, y="count", agg="sum")
+                    else:
+                        agg_df = pd.DataFrame(
+                            list(best_match["result"].items()),
+                            columns=[grp, val]
+                        )
+                        return _safe_chart(agg_df, kind=chart_kind, x=grp, y=val, agg="sum")
+                except Exception:
+                    pass
+
         if chart_x in df.columns and chart_y in df.columns:
             n_unique = df[chart_x].nunique() if chart_x in df.columns else 999
             if chart_kind == "pie" and (n_unique > 8 or chart_agg not in ("count", None)):
                 chart_kind = "bar"
-            return _safe_chart(df, kind=chart_kind,
-                               x=chart_x, y=chart_y, agg=chart_agg)
-
-        # raw result list se chart
-        if previous_results:
-            for key, prev in reversed(list(previous_results.items())):
-                if "aggregate" not in key or not isinstance(prev, dict):
-                    continue
-                res = prev.get("result")
-                if isinstance(res, list) and res:
-                    raw_df = pd.DataFrame(res)
-                    if chart_x in raw_df.columns and chart_y in raw_df.columns:
-                        return _safe_chart(raw_df, kind=chart_kind,
-                                           x=chart_x, y=chart_y, agg="mean")
+            return _safe_chart(df, kind=chart_kind, x=chart_x, y=chart_y, agg=chart_agg)
 
         return {"chart_path": None, "note": "No data for chart"}
 

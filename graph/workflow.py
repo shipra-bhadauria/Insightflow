@@ -15,6 +15,13 @@ def route_after_critic(state: InsightFlowState) -> str:
     return state["next_agent"]
 
 
+def route_from_start(state: InsightFlowState) -> str:
+    """Dashboard mode — skip LLM Planner, go straight to retrieval/analyst."""
+    if state.get("mode") == "dashboard":
+        return "retrieval"
+    return "planner"
+
+
 def hitl_node(state: InsightFlowState) -> dict:
     """HITL checkpoint — UI handles approve/reject via buttons."""
     return {
@@ -49,7 +56,10 @@ def build_graph() -> StateGraph:
     graph.add_edge("reporter", "hitl")
     graph.add_edge("hitl",     END)
 
-    graph.set_entry_point("planner")
+    graph.set_conditional_entry_point(
+        route_from_start,
+        {"planner": "planner", "retrieval": "retrieval"}
+    )
 
     return graph.compile()
 

@@ -64,8 +64,7 @@ def render_center_panel():
         _run_analysis(question, mode="single")
 
     if dashboard_clicked and st.session_state.dataset_path:
-       
-        _run_analysis("Generate a complete dashboard analysis", mode="dashboard")
+        _run_dashboard_direct()
 
     if st.session_state.get("final_state"):
         if st.session_state.pop("cache_hit", False):
@@ -119,7 +118,7 @@ def _run_analysis(question: str, mode: str):
 
     st.session_state["last_question"] = question
 
-    cached = get_cached(question, st.session_state.dataset_path, mode)
+    cached = get_cached(question, st.session_state.dataset_path, mode) if mode != "dashboard" else None
     if cached:
         from state import CriticVerdict
         cached["critic_history"] = [CriticVerdict(attempt_number=1, approved=True, confidence_score=0.9, reason="Loaded from cache", rows_validated=0)]
@@ -271,7 +270,8 @@ def _run_analysis(question: str, mode: str):
 
     
     st.session_state.final_state = final_state
-    set_cache(question, st.session_state.dataset_path, mode, final_state)
+    if mode != "dashboard":
+        set_cache(question, st.session_state.dataset_path, mode, final_state)
 
     confidence = final_state["critic_history"][-1].confidence_score * 100
     st.session_state.past_analyses.append({
@@ -279,6 +279,64 @@ def _run_analysis(question: str, mode: str):
         "confidence": f"{confidence:.0f}",
         "report":     final_state["final_report"],
     })
+
+    st.rerun()
+
+
+def _run_dashboard_direct():
+    """Full Dashboard — pure tools only. No Planner/Retrieval/Critic/Reporter agents."""
+    from state          import new_state, CriticVerdict
+    from agents.analyst import analyst_node
+    from logger         import ui_logger as logger
+    import time
+
+    st.session_state["last_question"] = "Generate a complete dashboard analysis"
+
+    with st.spinner("⚡ Building dashboard..."):
+        t0 = time.time()
+        try:
+            state = new_state(
+                question="Generate a complete dashboard analysis",
+                dataset_path=st.session_state.dataset_path,
+                source_type=st.session_state.get("source_type", "csv"),
+                mode="dashboard",
+            )
+            state["quality_report"]   = st.session_state.quality_report
+            state["detected_columns"] = st.session_state.detected_columns
+
+            result  = analyst_node(state)
+            attempt = result["analysis_history"][0]
+
+            n_rows   = state["quality_report"]["total_rows"] if state.get("quality_report") else 0
+            n_charts = len(attempt.chart_paths)
+            summary  = (
+                f"### Dashboard Summary\n\n"
+                f"Analyzed **{n_rows} rows** across all categories and numeric columns. "
+                f"Generated **{n_charts} charts** covering counts, means, distributions, "
+                f"trends, correlations, and anomalies."
+            )
+
+            final_state = {
+                "question":            "Generate a complete dashboard analysis",
+                "final_report":        summary,
+                "follow_up_questions": [],
+                "trace":               result.get("trace", []),
+                "critic_history":      [CriticVerdict(
+                    attempt_number=1, approved=True, confidence_score=0.95,
+                    reason="Programmatic dashboard — tools only",
+                    rows_validated=n_rows,
+                )],
+                "analysis_history":    result["analysis_history"],
+                "mode":                "dashboard",
+            }
+
+            st.session_state.final_state = final_state
+            logger.info(f"Dashboard built | charts={n_charts} | elapsed={time.time()-t0:.1f}s")
+
+        except Exception as e:
+            logger.error(f"Dashboard failed | {str(e)}", exc_info=True)
+            st.error(f"⚠️ Dashboard generation failed: {str(e)[:200]}")
+            return
 
     st.rerun()
 
@@ -692,79 +750,14 @@ def _render_dashboard():
         color:#3a5a3a;margin-bottom:12px">CHARTS</div>
         """, unsafe_allow_html=True)
 
-        try:
-            from tools.chart import make_plotly_chart
-            df   = st.session_state.get("df")
-            figs = []
-            seen = set()
-
-            # tool results — live ya cached dono se
-            tool_results_list = []
-            if final_state.get("analysis_history"):
-                for a in final_state["analysis_history"]:
-                    if hasattr(a, "tool_result") and a.tool_result:
-                        tool_results_list.append(a.tool_result)
-            elif final_state.get("analysis_history_tools"):
-                tool_results_list = final_state["analysis_history_tools"]
-
-            if df is not None:
-                for tool_result in tool_results_list:
-                    for key, val in tool_result.items():
-                        if not isinstance(val, dict):
-                            continue
-                        grp = val.get("group_by")
-                        vc  = val.get("value_col", "")
-                        agg = val.get("agg", "sum")
-                        if not grp:
-                            continue
-                        grp = grp[0] if isinstance(grp, list) else grp
-                        if grp not in df.columns:
-                            continue
-                        y_col = vc if (vc and vc in df.columns and vc != grp) else grp
-                        if y_col != grp and agg == "count":
-                            agg = "mean"
-                        sig = f"{grp}|{y_col}|{agg}"
-                        if sig in seen:
-                            continue
-                        seen.add(sig)
-                        kind = "pie" if (agg == "count" and df[grp].nunique() <= 8) else "bar"
-                        try:
-                            fig = make_plotly_chart(df, kind=kind, x=grp, y=y_col, agg=agg)
-                            if fig:
-                                figs.append((y_col, fig))
-                        except Exception:
-                            pass
-
-            if figs:
-                cfg = {"scrollZoom": True, "displayModeBar": True}
-                if len(figs) == 1:
-                    st.plotly_chart(figs[0][1], use_container_width=True, config=cfg, key=f"chart_0")
-                else:
-                    for i in range(0, len(figs), 2):
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.plotly_chart(figs[i][1], use_container_width=True, config=cfg, key=f"chart_{i}")
-                        with col2:
-                            if i + 1 < len(figs):
-                                st.plotly_chart(figs[i+1][1], use_container_width=True, config=cfg, key=f"chart_{i+1}")
-            else:
-                for i in range(0, len(charts), 2):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if os.path.exists(charts[i]):
-                            st.image(charts[i], use_container_width=True)
-                    with col2:
-                        if i + 1 < len(charts) and os.path.exists(charts[i+1]):
-                            st.image(charts[i+1], use_container_width=True)
-        except Exception:
-            for i in range(0, len(charts), 2):
-                col1, col2 = st.columns(2)
-                with col1:
-                    if os.path.exists(charts[i]):
-                        st.image(charts[i], use_container_width=True)
-                with col2:
-                    if i + 1 < len(charts) and os.path.exists(charts[i+1]):
-                        st.image(charts[i+1], use_container_width=True)
+        for i in range(0, len(charts), 2):
+            col1, col2 = st.columns(2)
+            with col1:
+                if os.path.exists(charts[i]):
+                    st.image(charts[i], use_container_width=True)
+            with col2:
+                if i + 1 < len(charts) and os.path.exists(charts[i+1]):
+                    st.image(charts[i+1], use_container_width=True)
 
                     
     if st.session_state.quality_report:

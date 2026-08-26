@@ -28,9 +28,10 @@ def make_chart(
     if existing_cols:
         df = df.dropna(subset=existing_cols)
 
-    # convert y to numeric
-    df[y] = pd.to_numeric(df[y], errors="coerce")
-    df = df.dropna(subset=[y])
+    # count agg mein y numeric hone ki zaroorat nahi (x == y ho sakta hai, category column)
+    if agg != "count":
+        df[y] = pd.to_numeric(df[y], errors="coerce")
+        df = df.dropna(subset=[y])
 
     if len(df) == 0:
         return {
@@ -110,7 +111,12 @@ def make_chart(
         ax.hist(df[y], bins=20, color="#c5f432", edgecolor="#0a0e0a")
 
     elif kind == "pie":
-        plot_data = df.groupby(x)[y].sum().sort_values(ascending=False).head(8)
+        if agg == "count":
+            plot_data = df.groupby(x)[y].count().sort_values(ascending=False).head(8)
+        elif agg == "mean":
+            plot_data = df.groupby(x)[y].mean().sort_values(ascending=False).head(8)
+        else:
+            plot_data = df.groupby(x)[y].sum().sort_values(ascending=False).head(8)
         wedge_colors = colors_list[:len(plot_data)]
         wedges, texts, autotexts = ax.pie(
             plot_data.values,
@@ -157,8 +163,8 @@ def make_chart(
 
     filename   = f"{kind}_{x}_{y}.png".replace(" ", "_")
     chart_path = os.path.join(output_dir, filename)
-    plt.savefig(chart_path, dpi=150, bbox_inches="tight")
-    plt.close()
+    plt.savefig(chart_path, dpi=90)
+    plt.close(fig)
 
     return {
         "kind":       kind,
@@ -185,7 +191,9 @@ def make_plotly_chart(
     existing = [c for c in [x, y] if c in df.columns]
     if existing:
         df = df.dropna(subset=existing)
-    if y in df.columns:
+
+    # count agg mein y numeric hone ki zaroorat nahi (x == y ho sakta hai, category column)
+    if agg != "count" and y in df.columns:
         df[y] = pd.to_numeric(df[y], errors="coerce")
         df = df.dropna(subset=[y])
 
